@@ -18,7 +18,7 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 # ====== Config ======
 
 # Read credentials from environment variables
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN_TEST')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
