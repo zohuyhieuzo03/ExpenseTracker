@@ -5,16 +5,23 @@ from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+import google.generativeai as genai
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
 
+# Initialize Gemini AI
+genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+model = genai.GenerativeModel('gemini-2.0-flash')
+
 # ====== Config ======
 
 # Read credentials from environment variables
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN_TEST')
 GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 # Parse Google credentials from JSON string
 if GOOGLE_CREDENTIALS:
@@ -67,6 +74,51 @@ def get_main_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def parse_expense_with_gemini(input_text: str) -> tuple[float, str]:
+    """
+    Parse expense text using Gemini AI to extract amount and note
+    Returns a tuple of (amount, note)
+    """
+    prompt = f"""Parse the following expense text into amount and note. 
+    The amount should be a number (can be in thousands with 'k' or millions with 'm').
+    The note should be a description of the expense.
+    Return ONLY a JSON object with 'amount' and 'note' fields, nothing else.
+    
+    Text: {input_text}
+    
+    Example output:
+    {{
+        "amount": 50000,
+        "note": "lunch with friends"
+    }}"""
+    
+    response = model.generate_content(prompt)
+    result = response.text.strip()
+    
+    # Clean up the response to ensure it's valid JSON
+    if result.startswith('```json'):
+        result = result[7:]
+    if result.endswith('```'):
+        result = result[:-3]
+    result = result.strip()
+    
+    try:
+        # Parse the JSON response
+        parsed = json.loads(result)
+        return float(parsed['amount']), parsed['note']
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON: {e}")
+        print(f"Raw response: {result}")
+        raise ValueError("Failed to parse expense details. Please try again with a different format.")
+    except KeyError as e:
+        print(f"Missing key in JSON: {e}")
+        print(f"Raw response: {result}")
+        raise ValueError("Failed to parse expense details. Please try again with a different format.")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        print(f"Raw response: {result}")
+        raise ValueError("An unexpected error occurred. Please try again.")
+
 # ====== Telegram Bot Handlers ======
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,7 +156,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📝 Available commands:\n"
             "• /add <amount> <note> - Add an expense\n"
             "• /list - View your expenses\n"
-            "• /total - View total amount"
+            "• /total - View total amount\n"
+            "• /addsmart - Add an expense using Gemini AI\n"
         )
 
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -121,6 +174,26 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f'✅ Added: {amount} - {note}')
     except ValueError:
         await update.message.reply_text('❌ Invalid amount!')
+
+async def add_smart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Smart version of add command that uses Gemini AI to parse the input"""
+    if not context.args:
+        await update.message.reply_text('Please provide the expense details. Example: /addsmart 50k lunch with friends')
+        return
+
+    try:
+        # Combine all arguments into a single string
+        input_text = ' '.join(context.args)
+        
+        # Parse using Gemini AI
+        amount, note = parse_expense_with_gemini(input_text)
+        
+        user_id = update.effective_user.id
+        username = update.effective_user.first_name or update.effective_user.username or "Unknown"
+        add_expense_to_sheet(user_id, username, amount, note)
+        await update.message.reply_text(f'✅ Added: {amount:,.0f} - {note}')
+    except Exception as e:
+        await update.message.reply_text(f'❌ Error: {str(e)}')
 
 async def list_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -144,6 +217,7 @@ def main():
 
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('add', add))
+    app.add_handler(CommandHandler('addsmart', add_smart))
     app.add_handler(CommandHandler('list', list_expenses))
     app.add_handler(CommandHandler('total', total))
     app.add_handler(CallbackQueryHandler(button_callback))
