@@ -3,8 +3,8 @@ import json
 import os
 from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 
 # Load environment variables from .env file
 load_dotenv()
@@ -53,10 +53,50 @@ def get_all_expenses(user_id):
     user_expenses = [rec for rec in records if str(rec['user_id']) == str(user_id)]
     return user_expenses
 
+def get_main_keyboard():
+    """Create the main menu keyboard"""
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ Add Expense", callback_data='add_expense'),
+            InlineKeyboardButton("📋 List Expenses", callback_data='list_expenses')
+        ],
+        [
+            InlineKeyboardButton("💰 Total", callback_data='total'),
+            InlineKeyboardButton("❓ Help", callback_data='help')
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # ====== Telegram Bot Handlers ======
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Hello! 🧾\nUse /add <amount> <note> to add an expense.\nUse /list to view the list, /total to view the total amount.')
+    welcome_text = (
+        "👋 Welcome to Expense Tracker Bot!\n\n"
+        "Use the buttons below or commands:\n"
+        "• /add <amount> <note> - Add an expense\n"
+        "• /list - View your expenses\n"
+        "• /total - View total amount"
+    )
+    await update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button callbacks"""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == 'add_expense':
+        await query.message.reply_text('Use /add <amount> <note> to add an expense')
+    elif query.data == 'list_expenses':
+        await list_expenses(update, context)
+    elif query.data == 'total':
+        await total(update, context)
+    elif query.data == 'help':
+        await query.message.reply_text(
+            "📝 Available commands:\n"
+            "• /add <amount> <note> - Add an expense\n"
+            "• /list - View your expenses\n"
+            "• /total - View total amount"
+        )
 
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -97,6 +137,7 @@ def main():
     app.add_handler(CommandHandler('add', add))
     app.add_handler(CommandHandler('list', list_expenses))
     app.add_handler(CommandHandler('total', total))
+    app.add_handler(CallbackQueryHandler(button_callback))
 
     print("Bot running...")
     app.run_polling()
