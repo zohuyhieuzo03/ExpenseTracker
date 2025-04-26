@@ -6,7 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 import google.generativeai as genai
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,7 +18,7 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 # ====== Config ======
 
 # Read credentials from environment variables
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN_TEST')
 GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -43,7 +43,7 @@ sheet = client.open_by_key(GOOGLE_SHEET_ID).sheet1
 def initialize_sheet():
     """Initialize sheet with required columns if empty"""
     if not sheet.get_all_records():
-        headers = ['user_id', 'username', 'amount', 'note']
+        headers = ['user_id', 'username', 'amount', 'note', 'timestamp']
         sheet.append_row(headers)
         print("Sheet initialized with headers:", headers)
 
@@ -53,7 +53,8 @@ initialize_sheet()
 # ====== Functions ======
 
 def add_expense_to_sheet(user_id, username, amount, note):
-    sheet.append_row([str(user_id), username, str(amount), note])
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    sheet.append_row([str(user_id), username, str(amount), note, current_time])
 
 def get_all_expenses(user_id):
     records = sheet.get_all_records()
@@ -118,6 +119,64 @@ def parse_expense_with_gemini(input_text: str) -> tuple[float, str]:
         print(f"Unexpected error: {e}")
         print(f"Raw response: {result}")
         raise ValueError("An unexpected error occurred. Please try again.")
+
+def get_expenses_by_time_range(user_id, time_range):
+    """Get expenses filtered by time range"""
+    records = sheet.get_all_records()
+    user_expenses = [rec for rec in records if str(rec['user_id']) == str(user_id)]
+    
+    now = datetime.now()
+    filtered_expenses = []
+    
+    for expense in user_expenses:
+        expense_time = datetime.strptime(expense['timestamp'], '%Y-%m-%d %H:%M:%S')
+        
+        if time_range == 'today':
+            if expense_time.date() == now.date():
+                filtered_expenses.append(expense)
+        elif time_range == 'week':
+            week_start = now - timedelta(days=now.weekday())
+            if expense_time.date() >= week_start.date():
+                filtered_expenses.append(expense)
+        elif time_range == 'month':
+            if expense_time.month == now.month and expense_time.year == now.year:
+                filtered_expenses.append(expense)
+    
+    return filtered_expenses
+
+def get_expenses_by_date(user_id, date_str):
+    """Get expenses for a specific date (format: DD/MM/YYYY)"""
+    try:
+        target_date = datetime.strptime(date_str, '%d/%m/%Y')
+        records = sheet.get_all_records()
+        user_expenses = [rec for rec in records if str(rec['user_id']) == str(user_id)]
+        
+        filtered_expenses = []
+        for expense in user_expenses:
+            expense_time = datetime.strptime(expense['timestamp'], '%Y-%m-%d %H:%M:%S')
+            if expense_time.date() == target_date.date():
+                filtered_expenses.append(expense)
+        
+        return filtered_expenses
+    except ValueError:
+        return []
+
+def get_expenses_by_month(user_id, month_str):
+    """Get expenses for a specific month (format: MM/YYYY)"""
+    try:
+        target_date = datetime.strptime(month_str, '%m/%Y')
+        records = sheet.get_all_records()
+        user_expenses = [rec for rec in records if str(rec['user_id']) == str(user_id)]
+        
+        filtered_expenses = []
+        for expense in user_expenses:
+            expense_time = datetime.strptime(expense['timestamp'], '%Y-%m-%d %H:%M:%S')
+            if expense_time.month == target_date.month and expense_time.year == target_date.year:
+                filtered_expenses.append(expense)
+        
+        return filtered_expenses
+    except ValueError:
+        return []
 
 # ====== Telegram Bot Handlers ======
 
@@ -206,9 +265,38 @@ async def list_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def total(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    expenses = get_all_expenses(user_id)
-    total_amount = sum(float(item['amount']) for item in expenses)
-    await update.message.reply_text(f'💵 Total expenses: {total_amount}')
+    
+    if not context.args:
+        # Default total for all time
+        expenses = get_all_expenses(user_id)
+        total_amount = sum(float(item['amount']) for item in expenses)
+        await update.message.reply_text(f'💵 Total expenses (all time): {total_amount:,.0f}')
+        return
+    
+    time_filter = context.args[0].lower()
+    
+    if time_filter in ['today', 'week', 'month']:
+        expenses = get_expenses_by_time_range(user_id, time_filter)
+        total_amount = sum(float(item['amount']) for item in expenses)
+        await update.message.reply_text(f'💵 Total expenses ({time_filter}): {total_amount:,.0f}')
+    elif '/' in time_filter:
+        if len(time_filter.split('/')) == 2:  # MM/YYYY format
+            expenses = get_expenses_by_month(user_id, time_filter)
+            total_amount = sum(float(item['amount']) for item in expenses)
+            await update.message.reply_text(f'💵 Total expenses for {time_filter}: {total_amount:,.0f}')
+        elif len(time_filter.split('/')) == 3:  # DD/MM/YYYY format
+            expenses = get_expenses_by_date(user_id, time_filter)
+            total_amount = sum(float(item['amount']) for item in expenses)
+            await update.message.reply_text(f'💵 Total expenses for {time_filter}: {total_amount:,.0f}')
+    else:
+        await update.message.reply_text(
+            "Invalid time filter! Use:\n"
+            "• /total today\n"
+            "• /total week\n"
+            "• /total month\n"
+            "• /total DD/MM/YYYY\n"
+            "• /total MM/YYYY"
+        )
 
 # ====== Main ======
 
