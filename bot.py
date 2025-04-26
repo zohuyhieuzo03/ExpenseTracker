@@ -1,16 +1,26 @@
 import gspread
 import json
+import os
+from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+# Load environment variables from .env file
+load_dotenv()
+
 # ====== Config ======
 
-with open('credentials.json', 'r') as f:
-    credentials = json.load(f)
-    TELEGRAM_TOKEN = credentials.get('telegram_token')
-    GOOGLE_SHEET_ID = credentials.get('google_sheet_id')
-    CREDENTIALS_FILE = 'credentials.json'
+# Read credentials from environment variables
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
+GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
+
+# Parse Google credentials from JSON string
+if GOOGLE_CREDENTIALS:
+    credentials_dict = json.loads(GOOGLE_CREDENTIALS)
+else:
+    raise ValueError("GOOGLE_CREDENTIALS environment variable is not set")
 
 # ====== Google Sheets Setup ======
 
@@ -19,7 +29,7 @@ scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive.file", 
          "https://www.googleapis.com/auth/drive"]
 
-creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(GOOGLE_SHEET_ID).sheet1
 
