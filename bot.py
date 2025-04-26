@@ -87,9 +87,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == 'add_expense':
         await query.message.reply_text('Use /add <amount> <note> to add an expense')
     elif query.data == 'list_expenses':
-        await list_expenses(update, context)
+        user_id = query.from_user.id
+        expenses = get_all_expenses(user_id)
+        if not expenses:
+            await query.message.reply_text('No expenses yet.')
+            return
+        message = "\n".join([f"{idx+1}. {item['amount']} - {item['note']}" for idx, item in enumerate(expenses)])
+        await query.message.reply_text(message)
     elif query.data == 'total':
-        await total(update, context)
+        user_id = query.from_user.id
+        expenses = get_all_expenses(user_id)
+        total_amount = sum(float(item['amount']) for item in expenses)
+        await query.message.reply_text(f'💵 Total expenses: {total_amount}')
     elif query.data == 'help':
         await query.message.reply_text(
             "📝 Available commands:\n"
