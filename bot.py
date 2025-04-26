@@ -43,18 +43,27 @@ sheet = client.open_by_key(GOOGLE_SHEET_ID).sheet1
 def initialize_sheet():
     """Initialize sheet with required columns if empty"""
     if not sheet.get_all_records():
-        headers = ['user_id', 'username', 'amount', 'note', 'timestamp']
+        headers = ['id', 'user_id', 'username', 'amount', 'note', 'timestamp']
         sheet.append_row(headers)
         print("Sheet initialized with headers:", headers)
+
+def get_next_id():
+    """Get the next available ID for a new expense"""
+    records = sheet.get_all_records()
+    if not records:
+        return 1
+    return max(int(record['id']) for record in records) + 1
+
+def add_expense_to_sheet(user_id, username, amount, note):
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    next_id = get_next_id()
+    sheet.append_row([str(next_id), str(user_id), username, str(amount), note, current_time])
+    return next_id
 
 # Initialize sheet on startup
 initialize_sheet()
 
 # ====== Functions ======
-
-def add_expense_to_sheet(user_id, username, amount, note):
-    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    sheet.append_row([str(user_id), username, str(amount), note, current_time])
 
 def get_all_expenses(user_id):
     records = sheet.get_all_records()
@@ -178,6 +187,26 @@ def get_expenses_by_month(user_id, month_str):
     except ValueError:
         return []
 
+def get_expense_by_id(expense_id):
+    """Get expense by its ID"""
+    records = sheet.get_all_records()
+    for record in records:
+        if str(record['id']) == str(expense_id):
+            return record
+    return None
+
+def update_expense(expense_id, amount=None, note=None):
+    """Update an expense's amount and/or note"""
+    records = sheet.get_all_records()
+    for idx, record in enumerate(records, start=2):  # start=2 because row 1 is header
+        if str(record['id']) == str(expense_id):
+            if amount is not None:
+                sheet.update_cell(idx, 4, str(amount))  # Column 4 is amount
+            if note is not None:
+                sheet.update_cell(idx, 5, note)  # Column 5 is note
+            return True
+    return False
+
 # ====== Telegram Bot Handlers ======
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,7 +232,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not expenses:
             await query.message.reply_text('No expenses yet.')
             return
-        message = "\n".join([f"{idx+1}. {item['amount']} - {item['note']}" for idx, item in enumerate(expenses)])
+        message = "\n".join([f"ID: {item['id']} - {item['amount']} - {item['note']}" for item in expenses])
         await query.message.reply_text(message)
     elif query.data == 'total':
         user_id = query.from_user.id
@@ -217,6 +246,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /list - View your expenses\n"
             "• /total - View total amount\n"
             "• /addsmart - Add an expense using Gemini AI\n"
+            "• /edit <id> <amount> <note> - Edit an expense\n"
         )
 
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -229,8 +259,8 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note = ' '.join(args[1:])
         user_id = update.effective_user.id
         username = update.effective_user.first_name or update.effective_user.username or "Unknown"
-        add_expense_to_sheet(user_id, username, amount, note)
-        await update.message.reply_text(f'✅ Added: {amount} - {note}')
+        expense_id = add_expense_to_sheet(user_id, username, amount, note)
+        await update.message.reply_text(f'✅ Added (ID: {expense_id}): {amount} - {note}')
     except ValueError:
         await update.message.reply_text('❌ Invalid amount!')
 
@@ -249,19 +279,60 @@ async def add_smart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         user_id = update.effective_user.id
         username = update.effective_user.first_name or update.effective_user.username or "Unknown"
-        add_expense_to_sheet(user_id, username, amount, note)
-        await update.message.reply_text(f'✅ Added: {amount:,.0f} - {note}')
+        expense_id = add_expense_to_sheet(user_id, username, amount, note)
+        await update.message.reply_text(f'✅ Added (ID: {expense_id}): {amount:,.0f} - {note}')
     except Exception as e:
         await update.message.reply_text(f'❌ Error: {str(e)}')
 
 async def list_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    expenses = get_all_expenses(user_id)
-    if not expenses:
-        await update.message.reply_text('No expenses yet.')
+    
+    if not context.args:
+        # Default list all expenses
+        expenses = get_all_expenses(user_id)
+        if not expenses:
+            await update.message.reply_text('No expenses yet.')
+            return
+        message = "\n".join([f"ID: {item['id']} - {item['amount']} - {item['note']}" for item in expenses])
+        await update.message.reply_text(message)
         return
-    message = "\n".join([f"{idx+1}. {item['amount']} - {item['note']}" for idx, item in enumerate(expenses)])
-    await update.message.reply_text(message)
+    
+    time_filter = context.args[0].lower()
+    
+    if time_filter in ['today', 'week', 'month']:
+        expenses = get_expenses_by_time_range(user_id, time_filter)
+        if not expenses:
+            await update.message.reply_text(f'No expenses for {time_filter}.')
+            return
+        message = f"📋 Expenses for {time_filter}:\n"
+        message += "\n".join([f"ID: {item['id']} - {item['amount']} - {item['note']}" for item in expenses])
+        await update.message.reply_text(message)
+    elif '/' in time_filter:
+        if len(time_filter.split('/')) == 2:  # MM/YYYY format
+            expenses = get_expenses_by_month(user_id, time_filter)
+            if not expenses:
+                await update.message.reply_text(f'No expenses for {time_filter}.')
+                return
+            message = f"📋 Expenses for {time_filter}:\n"
+            message += "\n".join([f"ID: {item['id']} - {item['amount']} - {item['note']}" for item in expenses])
+            await update.message.reply_text(message)
+        elif len(time_filter.split('/')) == 3:  # DD/MM/YYYY format
+            expenses = get_expenses_by_date(user_id, time_filter)
+            if not expenses:
+                await update.message.reply_text(f'No expenses for {time_filter}.')
+                return
+            message = f"📋 Expenses for {time_filter}:\n"
+            message += "\n".join([f"ID: {item['id']} - {item['amount']} - {item['note']}" for item in expenses])
+            await update.message.reply_text(message)
+    else:
+        await update.message.reply_text(
+            "Invalid time filter! Use:\n"
+            "• /list today\n"
+            "• /list week\n"
+            "• /list month\n"
+            "• /list DD/MM/YYYY\n"
+            "• /list MM/YYYY"
+        )
 
 async def total(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -298,6 +369,45 @@ async def total(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /total MM/YYYY"
         )
 
+async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Edit an expense by its ID"""
+    if len(context.args) < 3:
+        await update.message.reply_text(
+            "Invalid syntax! Use: /edit <id> <amount> <note>\n"
+            "Example: /edit 1 50000 lunch with friends"
+        )
+        return
+
+    try:
+        expense_id = context.args[0]
+        amount = float(context.args[1])
+        note = ' '.join(context.args[2:])
+
+        # Check if expense exists
+        expense = get_expense_by_id(expense_id)
+        if not expense:
+            await update.message.reply_text(f'❌ No expense found with ID: {expense_id}')
+            return
+
+        # Check if user owns this expense
+        if str(expense['user_id']) != str(update.effective_user.id):
+            await update.message.reply_text('❌ You can only edit your own expenses!')
+            return
+
+        # Update the expense
+        if update_expense(expense_id, amount, note):
+            await update.message.reply_text(
+                f'✅ Updated expense (ID: {expense_id}):\n'
+                f'Amount: {amount:,.0f}\n'
+                f'Note: {note}'
+            )
+        else:
+            await update.message.reply_text('❌ Failed to update expense')
+    except ValueError:
+        await update.message.reply_text('❌ Invalid amount!')
+    except Exception as e:
+        await update.message.reply_text(f'❌ Error: {str(e)}')
+
 # ====== Main ======
 
 def main():
@@ -308,6 +418,7 @@ def main():
     app.add_handler(CommandHandler('addsmart', add_smart))
     app.add_handler(CommandHandler('list', list_expenses))
     app.add_handler(CommandHandler('total', total))
+    app.add_handler(CommandHandler('edit', edit))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     print("Bot running...")
