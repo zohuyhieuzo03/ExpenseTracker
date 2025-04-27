@@ -239,6 +239,15 @@ def update_expense(expense_id, amount=None, note=None, category=None):
             return True
     return False
 
+def delete_expense(expense_id):
+    """Delete an expense by its ID"""
+    records = sheet.get_all_records()
+    for idx, record in enumerate(records, start=2):  # start=2 because row 1 is header
+        if str(record['id']) == str(expense_id):
+            sheet.delete_rows(idx)
+            return True
+    return False
+
 # ====== Telegram Bot Handlers ======
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -279,6 +288,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /total - View total amount\n"
             "• /addsmart - Add an expense using Gemini AI\n"
             "• /edit <id> <amount> <note> [category] - Edit an expense\n"
+            "• /delete <id> - Delete an expense\n"
         )
     elif query.data.startswith('category_'):
         category = query.data.replace('category_', '')
@@ -520,6 +530,37 @@ async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f'❌ Error: {str(e)}')
 
+async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete an expense by its ID"""
+    if not context.args:
+        await update.message.reply_text(
+            "Invalid syntax! Use: /delete <id>\n"
+            "Example: /delete 1"
+        )
+        return
+
+    try:
+        expense_id = context.args[0]
+        
+        # Check if expense exists
+        expense = get_expense_by_id(expense_id)
+        if not expense:
+            await update.message.reply_text(f'❌ No expense found with ID: {expense_id}')
+            return
+
+        # Check if user owns this expense
+        if str(expense['user_id']) != str(update.effective_user.id):
+            await update.message.reply_text('❌ You can only delete your own expenses!')
+            return
+
+        # Delete the expense
+        if delete_expense(expense_id):
+            await update.message.reply_text(f'✅ Deleted expense (ID: {expense_id})')
+        else:
+            await update.message.reply_text('❌ Failed to delete expense')
+    except Exception as e:
+        await update.message.reply_text(f'❌ Error: {str(e)}')
+
 # ====== Main ======
 
 def main():
@@ -536,6 +577,8 @@ def main():
     app.add_handler(CommandHandler('t', total))  # Alias for total
     app.add_handler(CommandHandler('edit', edit))
     app.add_handler(CommandHandler('e', edit))  # Alias for edit
+    app.add_handler(CommandHandler('delete', delete))
+    app.add_handler(CommandHandler('d', delete))  # Alias for delete
     app.add_handler(CallbackQueryHandler(button_callback))
 
     print("Bot running...")
