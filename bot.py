@@ -7,7 +7,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 import google.generativeai as genai
 from datetime import datetime, timedelta
-
 # Load environment variables from .env file
 load_dotenv()
 
@@ -18,7 +17,7 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 # ====== Config ======
 
 # Read credentials from environment variables
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN_TEST')
 GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
