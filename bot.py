@@ -18,7 +18,7 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 # ====== Config ======
 
 # Read credentials from environment variables
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN_TEST')
 GOOGLE_SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -415,10 +415,15 @@ def main():
 
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('add', add))
+    app.add_handler(CommandHandler('a', add))  # Alias for add
     app.add_handler(CommandHandler('addsmart', add_smart))
+    app.add_handler(CommandHandler('as', add_smart))  # Alias for addsmart
     app.add_handler(CommandHandler('list', list_expenses))
+    app.add_handler(CommandHandler('l', list_expenses))  # Alias for list
     app.add_handler(CommandHandler('total', total))
+    app.add_handler(CommandHandler('t', total))  # Alias for total
     app.add_handler(CommandHandler('edit', edit))
+    app.add_handler(CommandHandler('e', edit))  # Alias for edit
     app.add_handler(CallbackQueryHandler(button_callback))
 
     print("Bot running...")
